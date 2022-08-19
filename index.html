@@ -1,0 +1,538 @@
+<div id="system">
+  <div id="stVertex" class="helper"></div>
+  <div id="ndVertex" class="helper"></div>
+  <div id="rdVertex" class="helper"></div>
+  <div id="thVertex" class="helper"></div>
+  <div id="ttVertex" class="helper"></div>
+  <div id="trVertex" class="helper"></div>
+  <div id="stPoint" class="helper rounded"></div>
+  <canvas id="canvas"></canvas>
+  <div id="counter">0</div>
+  <!-- <button id="next-step">Next</button> -->
+</div>
+
+<style>
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    overflow: hidden;
+  }
+
+  body {
+    font-family: "Open Sans", Arial, Helvetica, sans-serif;
+    margin: 0;
+    padding: 0;
+    font-size: 14px;
+    background-color: #efefef;
+  }
+
+  a {
+    transition: all 0.2s;
+  }
+
+  h2 {
+    margin: 0;
+    padding: 0;
+    font-size: 11px;
+    text-transform: uppercase;
+  }
+
+  #system {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    user-select: none;
+  }
+
+  .helper {
+    width: 10px;
+    height: 10px;
+    position: absolute;
+  }
+  .helper.rounded {
+    border-radius: 50%;
+  }
+
+  #stVertex {
+    background-color: red;
+  }
+  #ndVertex {
+    background-color: green;
+  }
+  #rdVertex {
+    background-color: blue;
+  }
+  #thVertex {
+    background-color: orange;
+  }
+  #ttVertex {
+    background-color: purple;
+  }
+  #trVertex {
+    background-color: pink;
+  }
+  #stPoint {
+    background-color: black;
+  }
+
+  #next-step {
+    position: absolute;
+    bottom: 0;
+  }
+
+  #counter {
+    position: absolute;
+    bottom: 0;
+    font-size: 30px;
+  }
+</style>
+
+<script>
+  function trackTransforms(ctx) {
+    var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    var xform = svg.createSVGMatrix();
+    ctx.getTransform = function () {
+      return xform;
+    };
+
+    var savedTransforms = [];
+    var save = ctx.save;
+    ctx.save = function () {
+      savedTransforms.push(xform.translate(0, 0));
+      return save.call(ctx);
+    };
+
+    var restore = ctx.restore;
+    ctx.restore = function () {
+      xform = savedTransforms.pop();
+      return restore.call(ctx);
+    };
+
+    var scale = ctx.scale;
+    ctx.scale = function (sx, sy) {
+      xform = xform.scaleNonUniform(sx, sy);
+      return scale.call(ctx, sx, sy);
+    };
+
+    var rotate = ctx.rotate;
+    ctx.rotate = function (radians) {
+      xform = xform.rotate((radians * 180) / Math.PI);
+      return rotate.call(ctx, radians);
+    };
+
+    var translate = ctx.translate;
+    ctx.translate = function (dx, dy) {
+      xform = xform.translate(dx, dy);
+      return translate.call(ctx, dx, dy);
+    };
+
+    var transform = ctx.transform;
+    ctx.transform = function (a, b, c, d, e, f) {
+      var m2 = svg.createSVGMatrix();
+      m2.a = a;
+      m2.b = b;
+      m2.c = c;
+      m2.d = d;
+      m2.e = e;
+      m2.f = f;
+      xform = xform.multiply(m2);
+      return transform.call(ctx, a, b, c, d, e, f);
+    };
+
+    var setTransform = ctx.setTransform;
+    ctx.setTransform = function (a, b, c, d, e, f) {
+      xform.a = a;
+      xform.b = b;
+      xform.c = c;
+      xform.d = d;
+      xform.e = e;
+      xform.f = f;
+      return setTransform.call(ctx, a, b, c, d, e, f);
+    };
+
+    var pt = svg.createSVGPoint();
+    ctx.transformedPoint = function (x, y) {
+      pt.x = x;
+      pt.y = y;
+      return pt.matrixTransform(xform.inverse());
+    };
+  }
+
+  class Canvas {
+    constructor(app, options) {
+      this.app = app;
+      this.options = {
+        zoom: true,
+        pan: true,
+        animate: false,
+        ...options,
+      };
+
+      this.$canvas = document.querySelector("#canvas");
+      this.$canvas.width = window.innerWidth;
+      this.$canvas.height = window.innerHeight;
+      this.ctx = this.$canvas.getContext("2d");
+      trackTransforms(this.ctx);
+
+      this.zoomFactor = 1.1;
+      this.lastX = this.$canvas.width / 2;
+      this.lastY = this.$canvas.height / 2;
+      this.dragStart = null;
+      this.start = { x: 300, y: 500 };
+
+      this.handleZoom = this.handleZoom.bind(this);
+      this.handleMouseDown = this.handleMouseDown.bind(this);
+      this.handleMouseMove = this.handleMouseMove.bind(this);
+      this.handleMouseUp = this.handleMouseUp.bind(this);
+      this.redraw = this.redraw.bind(this);
+      this.update = this.update.bind(this);
+
+      if (this.options.zoom)
+        this.$canvas.addEventListener("mousewheel", this.handleZoom, false);
+      if (this.options.zoom || this.options.pan)
+        this.$canvas.addEventListener("mousedown", this.handleMouseDown, false);
+      if (this.options.zoom || this.options.pan)
+        this.$canvas.addEventListener("mousemove", this.handleMouseMove, false);
+      if (this.options.zoom || this.options.pan)
+        this.$canvas.addEventListener("mouseup", this.handleMouseUp, false);
+    }
+
+    animate() {
+      window.requestAnimationFrame(this.update);
+    }
+
+    clearCanvas() {
+      this.ctx.clearRect(0, 0, this.$canvas.width, this.$canvas.height);
+    }
+
+    redraw() {
+      let p1 = this.ctx.transformedPoint(0, 0);
+      let p2 = this.ctx.transformedPoint(
+        this.$canvas.width,
+        this.$canvas.height
+      );
+      this.ctx.clearRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y);
+
+      this.ctx.save();
+      this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+      this.ctx.clearRect(0, 0, this.$canvas.width, this.$canvas.height);
+      this.ctx.restore();
+
+      this.update();
+    }
+
+    update() {
+      this.app.draw(this.ctx);
+
+      if (this.options.animate) window.requestAnimationFrame(this.update);
+    }
+
+    zoom(delta) {
+      let pt = this.ctx.transformedPoint(this.lastX, this.lastY);
+      this.ctx.translate(pt.x, pt.y);
+
+      let factor = Math.pow(this.zoomFactor, delta);
+      this.ctx.scale(factor, factor);
+      this.ctx.translate(-pt.x, -pt.y);
+
+      this.redraw();
+    }
+
+    handleZoom(e) {
+      let delta = e.wheelDelta ? e.wheelDelta / 40 : e.detail ? -e.detail : 0;
+      if (delta) this.zoom(delta);
+    }
+
+    handleMouseDown(e) {
+      this.lastX = e.offsetX || e.pageX - this.$canvas.offsetLeft;
+      this.lastY = e.offsetY || e.pageY - this.$canvas.offsetTop;
+
+      this.dragStart = this.ctx.transformedPoint(this.lastX, this.lastY);
+    }
+
+    handleMouseMove(e) {
+      this.lastX = e.offsetX || e.pageX - this.$canvas.offsetLeft;
+      this.lastY = e.offsetY || e.pageY - this.$canvas.offsetTop;
+
+      if (!this.dragStart) return;
+
+      let pt = this.ctx.transformedPoint(this.lastX, this.lastY);
+      this.ctx.translate(pt.x - this.dragStart.x, pt.y - this.dragStart.y);
+      this.redraw();
+    }
+
+    handleMouseUp(e) {
+      this.dragStart = null;
+    }
+  }
+
+  class DomUI {
+    constructor(app) {
+      this.app = app;
+      this.$stVertex = document.querySelector("#stVertex");
+      this.$ndVertex = document.querySelector("#ndVertex");
+      this.$rdVertex = document.querySelector("#rdVertex");
+      this.$thVertex = document.querySelector("#thVertex");
+      this.$ttVertex = document.querySelector("#ttVertex");
+      this.$trVertex = document.querySelector("#trVertex");
+      this.$stPoint = document.querySelector("#stPoint");
+      this.$counter = document.querySelector("#counter");
+
+      this.handleClick = this.handleClick.bind(this);
+      this.handleMouseMove = this.handleMouseMove.bind(this);
+      this.load = this.load.bind(this);
+      this.reload = this.reload.bind(this);
+
+      window.addEventListener("click", this.handleClick);
+      window.addEventListener("mousemove", this.handleMouseMove, false);
+
+      this.isPickingVertex = false;
+      this.vertices = [];
+      this.startingPoint = null;
+
+      this.load();
+    }
+
+    load() {
+      this.$counter.innerHTML = this.app.counter;
+    }
+
+    reload() {
+      this.load();
+    }
+
+    pickVertices() {
+      this.pickNextVertex();
+
+      this.isPickingVertex = true;
+    }
+
+    pickNextVertex(vertex) {
+      if (this.vertices.length === 0) {
+        this.$stVertex.style.display = "block";
+        this.$ndVertex.style.display = "none";
+        this.$rdVertex.style.display = "none";
+        this.$thVertex.style.display = "none";
+        this.$ttVertex.style.display = "none";
+        this.$trVertex.style.display = "none";
+        this.$stPoint.style.display = "none";
+      } else if (this.vertices.length === 1) {
+        this.$stVertex.style.left = vertex.x;
+        this.$stVertex.style.top = vertex.y;
+        //this.$stVertex.innerHTML = `${vertex.x}, ${vertex.y}`
+
+        this.$ndVertex.style.display = "block";
+        this.$ndVertex.style.left = vertex.x;
+        this.$ndVertex.style.top = vertex.y;
+      } else if (this.vertices.length === 2) {
+        this.$ndVertex.style.left = vertex.x;
+        this.$ndVertex.style.top = vertex.y;
+        //this.$ndVertex.innerHTML = `${vertex.x}, ${vertex.y}`
+
+        this.$rdVertex.style.display = "block";
+        this.$rdVertex.style.left = vertex.x;
+        this.$rdVertex.style.top = vertex.y;
+      } else if (this.vertices.length === 3) {
+        this.$rdVertex.style.left = vertex.x;
+        this.$rdVertex.style.top = vertex.y;
+
+        this.$thVertex.style.display = "block";
+        this.$thVertex.style.left = vertex.x;
+        this.$thVertex.style.top = vertex.y;
+      } else if (this.vertices.length === 4) {
+        this.$thVertex.style.left = vertex.x;
+        this.$thVertex.style.top = vertex.y;
+
+        this.$ttVertex.style.display = "block";
+        this.$ttVertex.style.left = vertex.x;
+        this.$ttVertex.style.top = vertex.y;
+      } else if (this.vertices.length === 5) {
+        this.$ttVertex.style.left = vertex.x;
+        this.$ttVertex.style.top = vertex.y;
+
+        this.$trVertex.style.display = "block";
+        this.$trVertex.style.left = vertex.x;
+        this.$trVertex.style.top = vertex.y;
+      } else if (this.vertices.length === 6) {
+        this.$trVertex.style.left = vertex.x;
+        this.$trVertex.style.top = vertex.y;
+      }
+
+      if (this.vertices.length === this.app.totalVertices) {
+        this.$stPoint.style.display = "block";
+        this.$stPoint.style.left = vertex.x;
+        this.$stPoint.style.top = vertex.y;
+      }
+    }
+
+    handleClick(e) {
+      const currentPos = { x: e.clientX, y: e.clientY };
+
+      if (this.isPickingVertex) {
+        if (this.vertices.length < this.app.totalVertices) {
+          this.vertices = this.vertices.concat({ ...currentPos });
+          this.pickNextVertex(currentPos);
+        } else {
+          this.$stVertex.style.display = "none";
+          this.$ndVertex.style.display = "none";
+          this.$rdVertex.style.display = "none";
+          this.$thVertex.style.display = "none";
+          this.$ttVertex.style.display = "none";
+          this.$trVertex.style.display = "none";
+          this.$stPoint.style.display = "none";
+          this.startingPoint = currentPos;
+          this.isPickingVertex = false;
+          this.app.startGame(this.vertices, this.startingPoint);
+        }
+      }
+
+      if (e.target.id === "next-step") {
+        this.app.nextStep();
+      }
+    }
+
+    handleMouseMove(e) {
+      if (this.isPickingVertex && this.vertices.length === 0) {
+        this.$stVertex.style.top = e.clientY;
+        this.$stVertex.style.left = e.clientX;
+      } else if (this.isPickingVertex && this.vertices.length === 1) {
+        this.$ndVertex.style.top = e.clientY;
+        this.$ndVertex.style.left = e.clientX;
+      } else if (this.isPickingVertex && this.vertices.length === 2) {
+        this.$rdVertex.style.top = e.clientY;
+        this.$rdVertex.style.left = e.clientX;
+      } else if (this.isPickingVertex && this.vertices.length === 3) {
+        this.$thVertex.style.top = e.clientY;
+        this.$thVertex.style.left = e.clientX;
+      } else if (this.isPickingVertex && this.vertices.length === 4) {
+        this.$ttVertex.style.top = e.clientY;
+        this.$ttVertex.style.left = e.clientX;
+      } else if (this.isPickingVertex && this.vertices.length === 5) {
+        this.$trVertex.style.top = e.clientY;
+        this.$trVertex.style.left = e.clientX;
+      } else if (
+        this.isPickingVertex &&
+        this.vertices.length === this.app.totalVertices
+      ) {
+        this.$stPoint.style.top = e.clientY;
+        this.$stPoint.style.left = e.clientX;
+      }
+    }
+  }
+
+  class ChaosGame {
+    constructor() {
+      this.pixelSize = 0.1;
+      this.fraction = 2;
+      this.colors = ["red", "green", "blue", "orange", "purple", "pink"];
+      this.totalVertices = 3;
+      this.chances = [0, 0, 1, 1, 2, 2];
+
+      this.isGameStarted = false;
+      this.showNextStep = true;
+      this.vertices = [];
+      this.startingPoint = null;
+      this.counter = 0;
+
+      this.canvas = new Canvas(this, { zoom: true, pan: true, animate: true });
+      this.interface = new DomUI(this);
+
+      this.pickVertices();
+    }
+
+    pickVertices() {
+      this.interface.pickVertices();
+    }
+
+    startGame(vertices, start) {
+      this.isGameStarted = true;
+      this.vertices = [...vertices];
+      this.startingPoint = start;
+      this.currentPoint = this.startingPoint;
+
+      this.canvas.animate();
+    }
+
+    gamble() {
+      return Math.floor(Math.random() * this.chances.length);
+    }
+
+    nextStep() {
+      this.showNextStep = true;
+    }
+
+    draw(ctx) {
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+      this.drawPoint(ctx);
+    }
+
+    drawPoint(ctx) {
+      //if(this.showNextStep) {
+      //this.showNextStep = false
+      const vertexChance = this.chances[this.gamble()];
+      const currentPoint = this.currentPoint;
+      const targetVertex = this.vertices[vertexChance];
+
+      const newX =
+        currentPoint.x - (currentPoint.x - targetVertex.x) / this.fraction;
+      const newY =
+        currentPoint.y - (currentPoint.y - targetVertex.y) / this.fraction;
+
+      this.currentPoint = { x: newX, y: newY };
+
+      ctx.fillStyle =
+        this.colors[Math.floor(Math.random() * this.colors.length)];
+      //ctx.fillStyle = this.colors[vertexChance]
+      ctx.fillRect(
+        this.currentPoint.x,
+        this.currentPoint.y,
+        this.pixelSize,
+        this.pixelSize
+      );
+
+      this.counter++;
+      this.interface.reload();
+      //}
+    }
+  }
+
+  window.addEventListener("load", () => new ChaosGame());
+</script>
